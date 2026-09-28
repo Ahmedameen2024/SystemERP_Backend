@@ -8,7 +8,7 @@ const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL
 const DEFAULT_SUPABASE_HOST = 'aws-1-ap-south-1.pooler.supabase.com';
 const DEFAULT_SUPABASE_PORT = '6543';
 const DEFAULT_SUPABASE_DB = 'postgres';
-const DEFAULT_SUPABASE_USER = 'postgres.ejtnanmgqtxhohymvcir';
+const DEFAULT_SUPABASE_USER = 'postgres.mlezotgbaemxnksacydh';
 const DEFAULT_SUPABASE_PASS = process.env.DB_PASSWORD || '';
 
 const host = process.env.DB_HOST || (isProduction ? DEFAULT_SUPABASE_HOST : 'localhost');
