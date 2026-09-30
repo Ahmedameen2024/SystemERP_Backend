@@ -24,8 +24,15 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 // ── CORS Configuration ───────────────────────────────────────────
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps, curl, serverless) or any matching domain
-    if (!origin || process.env.NODE_ENV !== 'production' || process.env.FRONTEND_URL === '*' || origin.includes('vercel.app') || origin === process.env.FRONTEND_URL) {
+    // Allow requests with no origin (like mobile apps, curl, serverless) or matching domains (internal / external)
+    if (
+      !origin ||
+      process.env.NODE_ENV !== 'production' ||
+      process.env.FRONTEND_URL === '*' ||
+      origin.includes('vercel.app') ||
+      origin === process.env.FRONTEND_URL ||
+      origin === process.env.FRONTEND_URL2
+    ) {
       callback(null, true);
     } else {
       callback(null, true); // Permissive CORS for deployed Vercel apps
