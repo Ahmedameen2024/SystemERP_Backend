@@ -912,3 +912,165 @@ export const createSalesReturn = async (req: Request, res: Response): Promise<vo
   }
 };
 
+
+
+// ========== SALES QUOTATIONS ==========
+
+export const getSalesQuotations = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await query(
+      `SELECT sq.*, 
+              c.name_ar AS customer_name, c.code AS customer_code,
+              curr.code AS currency_code, curr.name_ar AS currency_name, curr.symbol AS currency_symbol,
+              b.name_ar AS branch_name
+       FROM sales_quotations sq
+       JOIN customers c ON c.id = sq.customer_id
+       LEFT JOIN currencies curr ON curr.id = sq.currency_id
+       LEFT JOIN branches b ON b.id = sq.branch_id
+       WHERE b.company_id = $1 OR sq.branch_id IN (SELECT id FROM branches WHERE company_id = $1)
+       ORDER BY sq.quotation_date DESC, sq.created_at DESC`,
+      [req.user!.companyId]
+    );
+    successResponse(res, result.rows);
+  } catch (error) {
+    console.error('Error fetching sales quotations:', error);
+    errorResponse(res, 'خطأ في جلب عروض الأسعار', 500);
+  }
+};
+
+export const getSalesQuotationById = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const headerResult = await query(
+      `SELECT sq.*, 
+              c.name_ar AS customer_name, c.code AS customer_code, c.phone AS customer_phone,
+              curr.code AS currency_code, curr.name_ar AS currency_name, curr.symbol AS currency_symbol,
+              b.name_ar AS branch_name
+       FROM sales_quotations sq
+       JOIN customers c ON c.id = sq.customer_id
+       LEFT JOIN currencies curr ON curr.id = sq.currency_id
+       LEFT JOIN branches b ON b.id = sq.branch_id
+       WHERE sq.id = $1`,
+      [id]
+    );
+
+    if (headerResult.rows.length === 0) {
+      errorResponse(res, 'عرض السعر غير موجود', 404);
+      return;
+    }
+
+    const linesResult = await query(
+      `SELECT sql.*, i.name_ar AS item_name, i.code AS item_code, u.name_ar AS uom_name
+       FROM sales_quotation_lines sql
+       JOIN items i ON i.id = sql.item_id
+       LEFT JOIN uoms u ON u.id = sql.uom_id
+       WHERE sql.sales_quotation_id = $1
+       ORDER BY sql.sort_order ASC`,
+      [id]
+    );
+
+    successResponse(res, {
+      ...headerResult.rows[0],
+      lines: linesResult.rows,
+    });
+  } catch (error) {
+    console.error('Error fetching sales quotation details:', error);
+    errorResponse(res, 'خطأ في جلب تفاصيل عرض السعر', 500);
+  }
+};
+
+export const createSalesQuotation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { customerId, branchId, currencyId, quotationDate, validUntil, lines, notes } = req.body;
+
+    if (!customerId) {
+      errorResponse(res, 'العميل مطلوب', 400);
+      return;
+    }
+
+    const activeBranchId = branchId || req.user!.branchId;
+    if (!activeBranchId) {
+      errorResponse(res, 'الفرع مطلوب', 400);
+      return;
+    }
+
+    const quotationNumber = `QT-${Date.now()}`;
+    const date = quotationDate || new Date().toISOString().slice(0, 10);
+
+    let totalAmount = 0;
+    let taxAmount = 0;
+
+    const parsedLines = Array.isArray(lines) ? lines : [];
+    for (const line of parsedLines) {
+      const lineTotal = Number(line.quantity || 1) * Number(line.unitPrice || line.amount || 0);
+      const lineTax = Number(line.taxAmount || 0);
+      totalAmount += lineTotal;
+      taxAmount += lineTax;
+    }
+    const netAmount = totalAmount + taxAmount;
+
+    let activeCurrencyId = currencyId;
+    if (!activeCurrencyId) {
+      const currRes = await query(`SELECT base_currency_id FROM companies WHERE id = $1`, [req.user!.companyId]);
+      activeCurrencyId = currRes.rows[0]?.base_currency_id;
+    }
+
+    await transaction(async (client) => {
+      const headerRes = await client.query(
+        `INSERT INTO sales_quotations (quotation_number, quotation_date, valid_until, customer_id, branch_id, currency_id, total_amount, discount_amount, tax_amount, net_amount, notes, status, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8,$9,$10,'Draft',$11) RETURNING *`,
+        [quotationNumber, date, validUntil || null, customerId, activeBranchId, activeCurrencyId, totalAmount, taxAmount, netAmount, notes || '', req.user!.userId]
+      );
+      const quotationId = headerRes.rows[0].id;
+
+      for (let i = 0; i < parsedLines.length; i++) {
+        const line = parsedLines[i];
+        await client.query(
+          `INSERT INTO sales_quotation_lines (sales_quotation_id, item_id, uom_id, quantity, unit_price, tax_amount, total_amount, notes, sort_order)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [quotationId, line.itemId, line.uomId, Number(line.quantity || 1), Number(line.unitPrice || 0), Number(line.taxAmount || 0), Number(line.totalAmount || 0), line.notes || null, i]
+        );
+      }
+
+      successResponse(res, headerRes.rows[0], 'تم إنشاء عرض السعر بنجاح', 201);
+    });
+  } catch (error: any) {
+    console.error('Error creating sales quotation:', error);
+    errorResponse(res, error.message || 'خطأ في إنشاء عرض السعر', 500);
+  }
+};
+
+export const updateSalesQuotation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { status, validUntil, notes } = req.body;
+
+    const result = await query(
+      `UPDATE sales_quotations 
+       SET status = COALESCE($1, status), valid_until = COALESCE($2, valid_until), notes = COALESCE($3, notes)
+       WHERE id = $4 RETURNING *`,
+      [status, validUntil, notes, id]
+    );
+
+    if (result.rows.length === 0) {
+      errorResponse(res, 'عرض السعر غير موجود', 404);
+      return;
+    }
+
+    successResponse(res, result.rows[0], 'تم تحديث عرض السعر بنجاح');
+  } catch (error) {
+    console.error('Error updating sales quotation:', error);
+    errorResponse(res, 'خطأ في تحديث عرض السعر', 500);
+  }
+};
+
+export const deleteSalesQuotation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    await query(`DELETE FROM sales_quotations WHERE id = $1`, [id]);
+    successResponse(res, null, 'تم حذف عرض السعر بنجاح');
+  } catch (error) {
+    console.error('Error deleting sales quotation:', error);
+    errorResponse(res, 'خطأ في حذف عرض السعر', 500);
+  }
+};

@@ -12,6 +12,8 @@ import inventoryRoutes from './routes/inventory';
 import salesRoutes from './routes/sales';
 import cashBanksRoutes from './routes/cashBanks';
 import purchasingRoutes from './routes/purchasing';
+import hrRoutes from './routes/hr';
+import payrollRoutes from './routes/payroll';
 
 dotenv.config();
 
@@ -71,6 +73,8 @@ const healthHandler = (_req: express.Request, res: express.Response) => {
 };
 app.get('/api/health', healthHandler);
 app.get('/health', healthHandler);
+app.get('/', healthHandler);
+app.get('/api', healthHandler);
 
 // ── API Routes (Support both /api/ prefix and direct prefix) ─────
 app.use('/api/auth', authRoutes);
@@ -94,6 +98,12 @@ app.use('/cash-banks', cashBanksRoutes);
 app.use('/api/purchasing', purchasingRoutes);
 app.use('/purchasing', purchasingRoutes);
 
+app.use('/api/hr', hrRoutes);
+app.use('/hr', hrRoutes);
+
+app.use('/api/payroll', payrollRoutes);
+app.use('/payroll', payrollRoutes);
+
 // ── 404 Handler ──────────────────────────────────────────────────
 app.use((_req, res) => {
   res.status(404).json({ success: false, message: 'المسار غير موجود' });
@@ -103,7 +113,7 @@ app.use((_req, res) => {
 app.use(errorHandler);
 
 // ── Start Server (Only in Standalone Mode, Not Vercel Serverless) ─
-if (!process.env.VERCEL) {
+if (!process.env.VERCEL && process.env.NODE_ENV !== 'test') {
   const startServer = async () => {
     try {
       await testConnection();

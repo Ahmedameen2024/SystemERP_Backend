@@ -10,7 +10,7 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || '5432', 10),
   database: process.env.DB_NAME || 'postgres',
   user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
+  password: (process.env.DB_PASSWORD || 'postgres').replace(/^["']|["']$/g, ''),
   ssl: process.env.DB_HOST && process.env.DB_HOST !== 'localhost' ? { rejectUnauthorized: false } : false,
 });
 

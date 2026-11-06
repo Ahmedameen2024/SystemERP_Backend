@@ -161,9 +161,16 @@ export const updateCostCenter = async (req: Request, res: Response): Promise<voi
     const { id } = req.params;
     const { code, nameAr, nameEn, parentId, managerId, budget, status } = req.body;
     const result = await query(
-      `UPDATE cost_centers SET code=$1, name_ar=$2, name_en=$3, parent_id=$4, manager_id=$5, budget=$6, status=$7
-       WHERE id=$8 AND company_id=$9 RETURNING *`,
-      [code, nameAr, nameEn, parentId || null, managerId || null, budget, status, id, req.user!.companyId]
+      `UPDATE cost_centers 
+       SET code = COALESCE($1, code), 
+           name_ar = COALESCE($2, name_ar), 
+           name_en = COALESCE($3, name_en), 
+           parent_id = COALESCE($4, parent_id), 
+           manager_id = COALESCE($5, manager_id), 
+           budget = COALESCE($6, budget), 
+           status = COALESCE($7, status)
+       WHERE id = $8 AND company_id = $9 RETURNING *`,
+      [code || null, nameAr || null, nameEn || null, parentId || null, managerId || null, budget !== undefined ? budget : null, status || null, id, req.user!.companyId]
     );
     if (result.rows.length === 0) {
       errorResponse(res, 'مركز التكلفة غير موجود', 404);
@@ -1699,3 +1706,128 @@ export const postOpeningBalance = async (req: Request, res: Response): Promise<v
     errorResponse(res, error.message || 'خطأ في اعتماد الرصيد الافتتاحي', 500);
   }
 };
+
+// ========== TRIAL BALANCE & FINANCIAL STATEMENTS ==========
+
+export const getTrialBalance = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await query(
+      `SELECT * FROM v_trial_balance WHERE company_id = $1 ORDER BY account_code`,
+      [req.user!.companyId]
+    );
+    successResponse(res, result.rows);
+  } catch (error) {
+    console.error('Error fetching trial balance:', error);
+    errorResponse(res, 'خطأ في جلب ميزان المراجعة', 500);
+  }
+};
+
+export const getFinancialStatements = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const tbRes = await query(
+      `SELECT * FROM v_trial_balance WHERE company_id = $1 ORDER BY account_code`,
+      [req.user!.companyId]
+    );
+    const rows = tbRes.rows;
+
+    const revenue = rows
+      .filter((r) => r.account_type === 'Revenue')
+      .map((r) => ({ name: r.account_name_ar, amount: Number(r.balance) }));
+    const cogs = rows
+      .filter((r) => r.account_code.startsWith('51') || (r.account_name_ar && r.account_name_ar.includes('تكلفة')))
+      .map((r) => ({ name: r.account_name_ar, amount: -Math.abs(Number(r.balance)) }));
+    const expenses = rows
+      .filter((r) => r.account_type === 'Expense' && !(r.account_code.startsWith('51') || (r.account_name_ar && r.account_name_ar.includes('تكلفة'))))
+      .map((r) => ({ name: r.account_name_ar, amount: -Math.abs(Number(r.balance)) }));
+
+    const currentAssets = rows
+      .filter((r) => r.account_type === 'Asset' && (r.account_code.startsWith('11') || r.account_code.startsWith('12') || r.account_code.startsWith('13')))
+      .map((r) => ({ name: r.account_name_ar, amount: Number(r.balance) }));
+    const nonCurrentAssets = rows
+      .filter((r) => r.account_type === 'Asset' && !(r.account_code.startsWith('11') || r.account_code.startsWith('12') || r.account_code.startsWith('13')))
+      .map((r) => ({ name: r.account_name_ar, amount: Number(r.balance) }));
+
+    const currentLiabilities = rows
+      .filter((r) => r.account_type === 'Liability' && r.account_code.startsWith('21'))
+      .map((r) => ({ name: r.account_name_ar, amount: Number(r.balance) }));
+    const nonCurrentLiabilities = rows
+      .filter((r) => r.account_type === 'Liability' && !r.account_code.startsWith('21'))
+      .map((r) => ({ name: r.account_name_ar, amount: Number(r.balance) }));
+
+    const equity = rows
+      .filter((r) => r.account_type === 'Equity')
+      .map((r) => ({ name: r.account_name_ar, amount: Number(r.balance) }));
+
+    successResponse(res, {
+      incomeStatement: { revenue, cogs, expenses },
+      balanceSheet: {
+        assets: { current: currentAssets, nonCurrent: nonCurrentAssets },
+        liabilities: { current: currentLiabilities, nonCurrent: nonCurrentLiabilities },
+        equity,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching financial statements:', error);
+    errorResponse(res, 'خطأ في جلب القوائم المالية', 500);
+  }
+};
+
+export const getAccountLedger = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { accountId, fromDate, toDate } = req.query;
+    if (!accountId) {
+      errorResponse(res, 'رقم الحساب مطلوب', 400);
+      return;
+    }
+
+    let filterSql = 'WHERE l.gl_account_id = $1';
+    const params: unknown[] = [accountId];
+
+    if (fromDate) {
+      params.push(fromDate);
+      filterSql += ` AND je.entry_date >= $${params.length}`;
+    }
+    if (toDate) {
+      params.push(toDate);
+      filterSql += ` AND je.entry_date <= $${params.length}`;
+    }
+
+    const linesRes = await query(
+      `SELECT l.id, je.entry_date AS date, je.entry_number AS ref, 
+              COALESCE(l.line_description, je.description) AS desc,
+              COALESCE(l.debit_base, l.debit, 0) AS debit,
+              COALESCE(l.credit_base, l.credit, 0) AS credit,
+              je.status
+       FROM journal_entry_lines l
+       JOIN journal_entries je ON je.id = l.journal_entry_id
+       ${filterSql}
+       ORDER BY je.entry_date ASC, je.created_at ASC`,
+      params
+    );
+
+    let runningBalance = 0;
+    const linesWithBalance = linesRes.rows.map((row) => {
+      const debit = Number(row.debit);
+      const credit = Number(row.credit);
+      runningBalance += (debit - credit);
+      return {
+        ...row,
+        debit,
+        credit,
+        balance: runningBalance,
+      };
+    });
+
+    successResponse(res, {
+      lines: linesWithBalance,
+      totalDebit: linesWithBalance.reduce((s, r) => s + r.debit, 0),
+      totalCredit: linesWithBalance.reduce((s, r) => s + r.credit, 0),
+      finalBalance: runningBalance,
+      count: linesWithBalance.length,
+    });
+  } catch (error) {
+    console.error('Error fetching account ledger:', error);
+    errorResponse(res, 'خطأ في جلب كشف الحساب التفصيلي', 500);
+  }
+};
+

@@ -32,6 +32,12 @@ router.delete('/opening-balances/:id', authorize('accounting', 'opening_balances
 router.post('/opening-balances/:id/post', authorize('accounting', 'opening_balances', 'approve'), accounting.postOpeningBalance);
 
 
+// Financial Reports & Statements
+router.get('/trial-balance', authorize('accounting', 'chart_of_accounts', 'view'), accounting.getTrialBalance);
+router.get('/financial-statements', authorize('accounting', 'chart_of_accounts', 'view'), accounting.getFinancialStatements);
+router.get('/account-ledger', authorize('accounting', 'chart_of_accounts', 'view'), accounting.getAccountLedger);
+router.get('/account-details', authorize('accounting', 'chart_of_accounts', 'view'), accounting.getAccountLedger);
+
 // Receipt Vouchers
 router.get('/receipt-vouchers', authorize('vouchers', 'receipt_vouchers', 'view'), accounting.getReceiptVouchers);
 router.post('/receipt-vouchers', authorize('vouchers', 'receipt_vouchers', 'create'), accounting.createReceiptVoucher);

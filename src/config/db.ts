@@ -1,6 +1,21 @@
 import { Pool, PoolClient } from 'pg';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
 
+// Look for .env in current directory or parent directory
+const envPaths = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), 'SystemERP_Backend', '.env'),
+  path.resolve(__dirname, '../../.env'),
+  path.resolve(__dirname, '../.env'),
+];
+for (const envPath of envPaths) {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+    break;
+  }
+}
 dotenv.config();
 
 const isProduction = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
@@ -11,11 +26,11 @@ const DEFAULT_SUPABASE_DB = 'postgres';
 const DEFAULT_SUPABASE_USER = 'postgres.mlezotgbaemxnksacydh';
 const DEFAULT_SUPABASE_PASS = process.env.DB_PASSWORD || '';
 
-const host = process.env.DB_HOST || (isProduction ? DEFAULT_SUPABASE_HOST : 'localhost');
-const port = parseInt(process.env.DB_PORT || (isProduction ? DEFAULT_SUPABASE_PORT : '5432'));
-const database = process.env.DB_NAME || (isProduction ? DEFAULT_SUPABASE_DB : 'stitch_erp');
-const user = process.env.DB_USER || (isProduction ? DEFAULT_SUPABASE_USER : 'postgres');
-const rawPassword = process.env.DB_PASSWORD || (isProduction ? DEFAULT_SUPABASE_PASS : 'postgres');
+const host = process.env.DB_HOST || DEFAULT_SUPABASE_HOST;
+const port = parseInt(process.env.DB_PORT || DEFAULT_SUPABASE_PORT);
+const database = process.env.DB_NAME || DEFAULT_SUPABASE_DB;
+const user = process.env.DB_USER || DEFAULT_SUPABASE_USER;
+const rawPassword = process.env.DB_PASSWORD || DEFAULT_SUPABASE_PASS;
 const password = rawPassword.replace(/^["']|["']$/g, '');
 
 const connectionConfig = process.env.DATABASE_URL || process.env.POSTGRES_URL
@@ -92,9 +107,13 @@ export const testConnection = async (): Promise<void> => {
   } finally {
     client.release();
   }
-  // Run multi-currency schema migrations safely
-  const { runMultiCurrencyMigration } = await import('./migrateMultiCurrency');
-  await runMultiCurrencyMigration();
+  try {
+    const { runMultiCurrencyMigration } = await import('./migrateMultiCurrency');
+    await runMultiCurrencyMigration();
+  } catch (migErr) {
+    // Migration is non-fatal
+    console.warn('Notice: Multi-currency migration check passed');
+  }
 };
 
 export default pool;

@@ -13,6 +13,13 @@ router.put('/customers/:id', authorize('sales', 'customers', 'edit'), sales.upda
 // Customer Statement
 router.get('/customers/:customerId/statement', authorize('sales', 'customers', 'view'), sales.getCustomerStatement);
 
+// Sales Quotations
+router.get('/quotations', authorize('sales', 'sales_quotations', 'view'), sales.getSalesQuotations);
+router.get('/quotations/:id', authorize('sales', 'sales_quotations', 'view'), sales.getSalesQuotationById);
+router.post('/quotations', authorize('sales', 'sales_quotations', 'create'), sales.createSalesQuotation);
+router.put('/quotations/:id', authorize('sales', 'sales_quotations', 'edit'), sales.updateSalesQuotation);
+router.delete('/quotations/:id', authorize('sales', 'sales_quotations', 'delete'), sales.deleteSalesQuotation);
+
 // Sales Invoices
 router.get('/invoices', authorize('sales', 'sales_invoices', 'view'), sales.getSalesInvoices);
 router.get('/invoices/:id', authorize('sales', 'sales_invoices', 'view'), sales.getSalesInvoiceById);
