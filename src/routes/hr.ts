@@ -25,3 +25,4 @@ router.put('/leaves/:id/status', authorize('hr', 'leave_management', 'approve'),
 router.get('/dashboard', authorize('hr', 'hr_dashboard', 'view'), hr.getHRDashboard);
 
 export default router;
+

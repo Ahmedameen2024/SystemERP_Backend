@@ -204,3 +204,4 @@ export const createDeductionType = async (req: Request, res: Response): Promise<
     errorResponse(res, error.message || 'خطأ في إضافة نوع الاستقطاع', 500);
   }
 };
+

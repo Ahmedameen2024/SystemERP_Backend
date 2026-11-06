@@ -376,3 +376,4 @@ export const getHRDashboard = async (req: Request, res: Response): Promise<void>
     errorResponse(res, 'خطأ في جلب بيانات لوحة الموارد البشرية', 500);
   }
 };
+

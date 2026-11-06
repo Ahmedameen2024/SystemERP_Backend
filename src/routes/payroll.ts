@@ -16,3 +16,4 @@ router.post('/allowance-types', authorize('payroll', 'allowances_deductions', 'c
 router.post('/deduction-types', authorize('payroll', 'allowances_deductions', 'create'), payroll.createDeductionType);
 
 export default router;
+
